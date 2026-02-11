@@ -1,0 +1,192 @@
+
+services:
+  notifications-api:
+    env_file:
+      - ../.env
+    build:
+      context: ..
+      dockerfile: ./infra/Dockerfile.api
+    ports:
+      - "${API_PORT:-8000}:${UVICORN_PORT:-8000}"
+    environment:
+      UVICORN_PORT: "8000"
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      notifications-db-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os,urllib.request; p=os.getenv('UVICORN_PORT','8000'); urllib.request.urlopen(f'http://127.0.0.1:{p}/health', timeout=2).read()",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+
+  notifications-worker:
+    env_file:
+      - ../.env
+    build:
+      context: ..
+      dockerfile: ./infra/Dockerfile.worker
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      notifications-db-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          test -f /tmp/ready &&
+          python -c "import time, pathlib; p=pathlib.Path('/tmp/heartbeat'); t=float(p.read_text()) if p.exists() else 0; raise SystemExit(0 if time.time()-t < 20 else 1)"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  notifications-db:
+    env_file:
+      - ../.env
+    image: postgres:16
+    environment:
+      POSTGRES_DB: notifications
+      POSTGRES_USER: notifications
+      POSTGRES_PASSWORD: notifications
+    ports:
+      - "${PG_PORT:-5433}:5432"
+    volumes:
+      - notifications-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U notifications -d notifications" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  campaign-scheduler:
+    env_file:
+      - ../.env
+    build:
+      context: ..
+      dockerfile: ./infra/Dockerfile.api
+    command: [ "python", "-m", "notifications.campaign_scheduler.main" ]
+    depends_on:
+      - notifications-api
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          test -f /tmp/ready &&
+          python -c "import time, pathlib; p=pathlib.Path('/tmp/heartbeat'); t=float(p.read_text()) if p.exists() else 0; raise SystemExit(0 if time.time()-t < 20 else 1)"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  kafka:
+    env_file:
+      - ../.env
+    image: apache/kafka:3.8.0
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:${KAFKA_PORT:-9092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:29093"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+
+    healthcheck:
+      test: [ "CMD-SHELL", "bash -lc '>/dev/tcp/127.0.0.1/9092'" ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  kafka-init:
+    env_file:
+      - ../.env
+    build:
+      context: ..
+      dockerfile: ./infra/Dockerfile.api
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: [ "python", "-m", "notifications.kafka_init" ]
+    restart: on-failure:3
+
+  notifications-db-init:
+    env_file:
+      - ../.env
+    build:
+      context: ..
+      dockerfile: ./infra/Dockerfile.api
+    depends_on:
+      notifications-db:
+        condition: service_healthy
+    command: [ "python", "-m", "notifications.db_init" ]
+    restart: "no"
+
+  notifications-worker-tests:
+    env_file:
+      - ../.env
+    build:
+      context: ..
+      dockerfile: ./infra/Dockerfile.tests
+    working_dir: /app
+    command: ["pytest", "-vv", "--log-cli-level=INFO", "src/tests/worker"]
+    environment:
+      PYTHONPATH: "/app:/app/src"
+
+  notifications-api-tests:
+    env_file:
+      - ../.env
+    build:
+      context: ..
+      dockerfile: ./infra/Dockerfile.tests
+    working_dir: /app
+    command: [ "pytest",  "-vv", "--log-cli-level=INFO", "src/tests/api" ]
+    environment:
+      PYTHONPATH: "/app:/app/src"
+
+  notifications-campaign-scheduler-tests:
+    env_file:
+      - ../.env
+    build:
+      context: ..
+      dockerfile: ./infra/Dockerfile.tests
+    working_dir: /app
+    command: [ "pytest",  "-vv", "--log-cli-level=INFO", "src/tests/campaign_scheduler" ]
+    environment:
+      PYTHONPATH: "/app:/app/src"
+
+  mailpit:
+    env_file:
+      - ../.env
+    image: axllent/mailpit:v1.20.6
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+    environment:
+      MP_SMTP_BIND_ADDR: "0.0.0.0:1025"
+      MP_UI_BIND_ADDR: "0.0.0.0:8025"
+
+volumes:
+  notifications-db-data:
