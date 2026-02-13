@@ -32,7 +32,8 @@ async def test_job_processor_happy_email(
 
     email_sender.send.assert_awaited_once()
     call = email_sender.send.await_args
-    assert call.kwargs["to"] == "user@example.com"
+    assert call.kwargs["job"] == job_email
+    assert call.kwargs["contacts"].email == "user@example.com"
     assert "User" in call.kwargs["subject"]
     assert "User" in call.kwargs["body"]
 

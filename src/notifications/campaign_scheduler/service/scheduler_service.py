@@ -16,7 +16,7 @@ from notifications.campaign_scheduler.repositories.campaigns_repo import (
 )
 from notifications.campaign_scheduler.startup import create_db_pool, create_http_client
 from notifications.notifications_api.schemas.event import (
-    BaseEvent,
+    CampaignTriggeredEvent,
     CampaignTriggeredEventPayload,
     CampaignTriggeredSegment,
     EventType,
@@ -52,7 +52,7 @@ def _build_event(
     campaign_id: UUID,
     template_code: str,
     segment_id: str,
-) -> BaseEvent:
+) -> CampaignTriggeredEvent:
     payload = CampaignTriggeredEventPayload(
         campaign_id=campaign_id,
         template_code=template_code,
@@ -60,12 +60,12 @@ def _build_event(
         segment=CampaignTriggeredSegment(segment_id=segment_id),
     )
 
-    return BaseEvent(
+    return CampaignTriggeredEvent(
         event_id=uuid4(),
         event_type=EventType.CAMPAIGN_TRIGGERED,
         source="campaign_scheduler",
         occurred_at=datetime.now(timezone.utc),
-        payload=payload.model_dump(),
+        payload=payload,
     )
 
 

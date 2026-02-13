@@ -23,8 +23,8 @@ class FakeTemplateRepo:
     def __init__(self) -> None:
         self.get_template = AsyncMock(
             return_value=FakeTemplate(
-                subject="Hello, {name}!",
-                body="Welcome, {name}!",
+                subject="Hello, {{ name }}!",
+                body="Welcome, {{ name }}!",
             )
         )
 

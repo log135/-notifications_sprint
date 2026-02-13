@@ -12,6 +12,7 @@ class Settings(BaseSettings):
 
     project_name: str = "Notification API"
     api_v1_prefix: str = "/api/v1"
+    api_key: str = "change-me-in-production"
 
     kafka_bootstrap_servers: str = "kafka:29092"
 

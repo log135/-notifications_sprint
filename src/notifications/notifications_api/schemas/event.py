@@ -1,6 +1,7 @@
 from datetime import datetime, date
 from enum import Enum
-from typing import List
+from typing import List, Union, Literal
+from typing_extensions import Annotated
 
 from pydantic import BaseModel, Field
 from uuid import UUID
@@ -44,12 +45,31 @@ class CampaignTriggeredEventPayload(BaseModel):
     segment: CampaignTriggeredSegment
 
 
-class BaseEvent(BaseModel):
+class UserRegisteredEvent(BaseModel):
     event_id: UUID = Field(..., description="Unique id of the event")
-    event_type: EventType = Field(..., description="Type of the event")
+    event_type: Literal[EventType.USER_REGISTERED] = EventType.USER_REGISTERED
     source: str = Field(..., description="Event source (service name)")
     occurred_at: datetime = Field(..., description="When the event happened")
-    payload: dict = Field(
-        ...,
-        description="Event-specific payload (see EVENTS.md)",
-    )
+    payload: UserRegisteredEventPayload
+
+
+class NewFilmReleasedEvent(BaseModel):
+    event_id: UUID
+    event_type: Literal[EventType.NEW_FILM_RELEASED] = EventType.NEW_FILM_RELEASED
+    source: str
+    occurred_at: datetime
+    payload: NewFilmReleasedEventPayload
+
+
+class CampaignTriggeredEvent(BaseModel):
+    event_id: UUID
+    event_type: Literal[EventType.CAMPAIGN_TRIGGERED] = EventType.CAMPAIGN_TRIGGERED
+    source: str
+    occurred_at: datetime
+    payload: CampaignTriggeredEventPayload
+
+
+Event = Annotated[
+    Union[UserRegisteredEvent, NewFilmReleasedEvent, CampaignTriggeredEvent],
+    Field(discriminator="event_type")
+]

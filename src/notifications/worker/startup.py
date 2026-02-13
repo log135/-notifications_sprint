@@ -9,6 +9,7 @@ from aiokafka import AIOKafkaProducer
 from aiokafka.errors import KafkaConnectionError
 
 from notifications.worker.core.config import settings
+from notifications.common.retry import retry_async   # добавлен импорт
 
 logger = logging.getLogger(__name__)
 
@@ -18,63 +19,40 @@ async def create_http_client() -> httpx.AsyncClient:
 
 
 async def create_db_pool() -> asyncpg.Pool:
-    max_attempts = 10
-    delay_seconds = 1
+    async def _create_pool():
+        return await asyncpg.create_pool(
+            dsn=settings.db_asyncpg_dsn,
+            min_size=1,
+            max_size=5,
+        )
 
-    for attempt in range(1, max_attempts + 1):
-        try:
-            logger.info(
-                "Creating Postgres pool (attempt %s/%s)... dsn=%s",
-                attempt,
-                max_attempts,
-                settings.db_asyncpg_dsn,
-            )
-            pool = await asyncpg.create_pool(
-                dsn=settings.db_asyncpg_dsn,
-                min_size=1,
-                max_size=5,
-            )
-            logger.info("Postgres pool created")
-            return pool
-        except (OSError, asyncpg.PostgresError) as exc:
-            logger.warning(
-                "Failed to connect to Postgres on attempt %s/%s: %s",
-                attempt,
-                max_attempts,
-                exc,
-            )
-            if attempt == max_attempts:
-                logger.error("Giving up connecting to Postgres")
-                raise
-            await asyncio.sleep(delay_seconds)
+    pool = await retry_async(
+        _create_pool,
+        max_attempts=10,
+        delay=1,
+        exceptions=(OSError, asyncpg.PostgresError),
+        logger=logger
+    )
+    logger.info("Postgres pool created")
+    return pool
 
 
 async def create_kafka_producer() -> AIOKafkaProducer:
-    max_attempts = 10
-    delay_seconds = 1
-
-    producer = AIOKafkaProducer(bootstrap_servers=settings.kafka_bootstrap_servers)
-
-    for attempt in range(1, max_attempts + 1):
+    async def _start_producer():
+        producer = AIOKafkaProducer(bootstrap_servers=settings.kafka_bootstrap_servers)
         try:
-            logger.info(
-                "Starting Kafka producer (attempt %s/%s)... bootstrap_servers=%s",
-                attempt,
-                max_attempts,
-                settings.kafka_bootstrap_servers,
-            )
             await producer.start()
-            logger.info("Kafka producer started (for DLQ)")
-            return producer
-        except KafkaConnectionError as exc:
-            logger.warning(
-                "Failed to connect to Kafka on attempt %s/%s: %s",
-                attempt,
-                max_attempts,
-                exc,
-            )
-            if attempt == max_attempts:
-                logger.error("Giving up starting Kafka producer")
-                await producer.stop()
-                raise
-            await asyncio.sleep(delay_seconds)
+        except Exception:
+            await producer.stop()
+            raise
+        return producer
+
+    producer = await retry_async(
+        _start_producer,
+        max_attempts=10,
+        delay=1,
+        exceptions=(KafkaConnectionError,),
+        logger=logger
+    )
+    logger.info("Kafka producer started (for DLQ)")
+    return producer

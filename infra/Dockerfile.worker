@@ -13,7 +13,13 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src ./src
+COPY migrations ./migrations
+COPY alembic.ini .
+
+COPY infra/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 ENV PYTHONPATH=/app/src
 
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python", "-m", "notifications.worker.main"]

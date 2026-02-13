@@ -1,4 +1,5 @@
 SHELL := /bin/bash
+include .env
 .DEFAULT_GOAL := help
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
@@ -60,7 +61,7 @@ health:
 	@curl -sS $(API_URL)/health && echo
 
 ready:
-	@curl -sS $(API_URL)/ready && echo
+	@echo -n "Ready status: "; curl -s -o /dev/null -w "%{http_code}\n" $(API_URL)/ready
 
 health-all:
 	@$(COMPOSE) ps --format "table {{.Name}}\t{{.State}}\t{{.Health}}"
@@ -113,11 +114,13 @@ demo:
 	echo "Creating template (welcome_email / en / email)..."; \
 	curl -s -X POST "$$API/api/v1/templates" \
 	  -H "Content-Type: application/json" \
+	  -H "X-API-Key: $(API_KEY)" \
 	  -d '{"template_code":"welcome_email","locale":"en","channel":"email","subject":"Welcome!","body":"Registered via: {registration_channel}\nUser-Agent: {user_agent}"}' | cat; \
 	echo ""; \
 	echo "Publishing event user_registered..."; \
 	curl -s -X POST "$$API/api/v1/events" \
 	  -H "Content-Type: application/json" \
+	  -H "X-API-Key: $(API_KEY)" \
 	  -d "$$(printf '%s' '{"event_id":"'"$$EVENT_ID"'","event_type":"user_registered","source":"demo","occurred_at":"2026-02-04T12:00:00Z","payload":{"user_id":"'"$$USER_ID"'","registration_channel":"web","locale":"en","user_agent":"make-demo"}}')" | cat; \
 	echo ""; \
 	echo "Expected recipient email (demo mode): user-$$USER_ID@example.com"; \

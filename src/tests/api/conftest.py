@@ -1,16 +1,16 @@
 from uuid import UUID
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
 from notifications.notifications_api.main import app
-
 from notifications.notifications_api.utils.dependencies import (
     get_template_repository,
     get_notification_service,
+    get_kafka_publisher,
 )
-
 from notifications.notifications_api.schemas.template import (
     TemplateCreate,
     TemplateRead,
@@ -54,13 +54,32 @@ class FakeNotificationService:
         return 1
 
 
+class FakeKafkaPublisher:
+    def __init__(self):
+        self.start = AsyncMock()
+        self.stop = AsyncMock()
+        self.publish_job = AsyncMock()
+        self.is_ready = AsyncMock(return_value=True)
+
+
+@pytest.fixture(autouse=True)
+def set_test_api_key(monkeypatch):
+    monkeypatch.setenv("API_KEY", "test-api-key")
+    from notifications.common.config import settings
+
+    settings.api_key = "test-api-key"
+    yield
+
+
 @pytest.fixture(autouse=True)
 def override_dependencies():
     fake_repo = FakeTemplateRepo()
     fake_service = FakeNotificationService()
+    fake_publisher = FakeKafkaPublisher()
 
     app.dependency_overrides[get_template_repository] = lambda: fake_repo
     app.dependency_overrides[get_notification_service] = lambda: fake_service
+    app.dependency_overrides[get_kafka_publisher] = lambda: fake_publisher
 
     yield
 
@@ -69,4 +88,6 @@ def override_dependencies():
 
 @pytest.fixture
 def api_client() -> TestClient:
-    return TestClient(app)
+    client = TestClient(app)
+    client.headers.update({"X-API-Key": "test-api-key"})
+    return client

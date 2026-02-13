@@ -3,9 +3,7 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from notifications.notifications_api.repositories.templates import (
-    TemplateRepository,
-)
+from notifications.notifications_api.repositories.templates import TemplateRepository
 from notifications.notifications_api.schemas.template import (
     TemplateCreate,
     TemplateRead,
@@ -13,6 +11,7 @@ from notifications.notifications_api.schemas.template import (
 )
 from notifications.notifications_api.utils.dependencies import (
     get_template_repository,
+    verify_api_key,
 )
 
 router = APIRouter(prefix="/templates", tags=["templates"])
@@ -21,6 +20,7 @@ router = APIRouter(prefix="/templates", tags=["templates"])
 @router.get("", response_model=list[TemplateRead])
 async def list_templates(
     repo: TemplateRepository = Depends(get_template_repository),
+    _: str = Depends(verify_api_key),
     offset: int = Query(0, ge=0),
     limit: int = Query(100, gt=0, le=1000),
 ) -> list[TemplateRead]:
@@ -36,6 +36,7 @@ async def list_templates(
 async def create_template(
     data: TemplateCreate,
     repo: TemplateRepository = Depends(get_template_repository),
+    _: str = Depends(verify_api_key),
 ) -> TemplateRead:
     try:
         tpl = await repo.create(data)
@@ -52,6 +53,7 @@ async def create_template(
 async def get_template(
     template_id: UUID,
     repo: TemplateRepository = Depends(get_template_repository),
+    _: str = Depends(verify_api_key),
 ) -> TemplateRead:
     tpl = await repo.find_by_id(template_id)
     if tpl is None:
@@ -67,6 +69,7 @@ async def update_template(
     template_id: UUID,
     data: TemplateUpdate,
     repo: TemplateRepository = Depends(get_template_repository),
+    _: str = Depends(verify_api_key),
 ) -> TemplateRead:
     tpl = await repo.find_by_id(template_id)
     if tpl is None:

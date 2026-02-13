@@ -7,6 +7,7 @@ from typing import Any
 
 from aiokafka import AIOKafkaConsumer
 from aiokafka.errors import KafkaError
+from aiokafka.structs import TopicPartition
 
 from notifications.worker.dlq import DlqPublisher
 from notifications.common.schemas import NotificationJob
@@ -34,7 +35,7 @@ class KafkaNotificationConsumer:
             self._settings.kafka_outbox_topic,
             bootstrap_servers=self._settings.kafka_bootstrap_servers,
             group_id=self._settings.kafka_consumer_group,
-            enable_auto_commit=True,
+            enable_auto_commit=False,
             value_deserializer=lambda v: v,
         )
 
@@ -52,6 +53,17 @@ class KafkaNotificationConsumer:
                     logger.info("Stop flag set, breaking consumer loop")
                     break
                 await self._handle_message(msg.value)
+
+                try:
+                    tp = TopicPartition(msg.topic, msg.partition)
+                    await self._consumer.commit({tp: msg.offset + 1})
+                except Exception as e:
+                    logger.exception(
+                        "Failed to commit offset for message %s:%d",
+                        msg.topic,
+                        msg.offset,
+                    )
+
         except asyncio.CancelledError:
             logger.info("Kafka consumer cancelled")
             raise

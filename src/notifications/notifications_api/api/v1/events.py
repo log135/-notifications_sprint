@@ -1,10 +1,13 @@
 from fastapi import APIRouter, Depends, status
 
-from notifications.notifications_api.schemas.event import BaseEvent as Event
+from notifications.notifications_api.schemas.event import Event
 from notifications.notifications_api.services.notification_service import (
     NotificationService,
 )
-from notifications.notifications_api.utils.dependencies import get_notification_service
+from notifications.notifications_api.utils.dependencies import (
+    get_notification_service,
+    verify_api_key,
+)
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -17,6 +20,7 @@ router = APIRouter(prefix="/events", tags=["events"])
 async def receive_event(
     event: Event,
     service: NotificationService = Depends(get_notification_service),
+    _: str = Depends(verify_api_key),
 ):
     jobs_count = await service.handle_event(event)
     return {

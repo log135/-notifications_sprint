@@ -19,6 +19,10 @@ def clear_ready() -> None:
         pass
 
 
+def is_ready() -> bool:
+    return READY_PATH.exists()
+
+
 async def heartbeat_loop(interval_sec: float = 5.0) -> None:
     while True:
         try:

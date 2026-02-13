@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 
 from aiokafka import AIOKafkaProducer, errors
 
-from notifications.common.config import settings
+from notifications.common.retry import retry_async
 
 logger = logging.getLogger(__name__)
 
@@ -24,49 +24,41 @@ class KafkaNotificationJobPublisher:
         max_attempts = 10
         delay_seconds = 1
 
-        for attempt in range(1, max_attempts + 1):
+        async def _start_producer():
             producer = AIOKafkaProducer(
                 bootstrap_servers=self._bootstrap_servers,
                 value_serializer=lambda v: json.dumps(v, default=str).encode("utf-8"),
             )
             try:
-                logger.info(
-                    "Starting Kafka producer (attempt %s/%s) bootstrap_servers=%s",
-                    attempt,
-                    max_attempts,
-                    self._bootstrap_servers,
-                )
                 await producer.start()
             except Exception:
-                logger.exception(
-                    "Failed to start Kafka producer (attempt %s/%s) bootstrap_servers=%s",
-                    attempt,
-                    max_attempts,
-                    self._bootstrap_servers,
-                )
                 try:
                     await producer.stop()
                 except Exception:
                     logger.exception("Producer stop failed after unsuccessful start")
+                raise
+            return producer
 
-                if attempt == max_attempts:
-                    logger.error(
-                        "Kafka producer is unavailable after %s attempts; switching to degraded mode",
-                        max_attempts,
-                    )
-                    self._enabled = False
-                    self._producer = None
-                    return
-
-                await asyncio.sleep(delay_seconds)
-                continue
-
+        try:
+            producer = await retry_async(
+                _start_producer,
+                max_attempts=max_attempts,
+                delay=delay_seconds,
+                exceptions=(Exception,),
+                logger=logger
+            )
             self._producer = producer
             self._enabled = True
             logger.info(
                 "Kafka producer started bootstrap_servers=%s", self._bootstrap_servers
             )
-            return
+        except Exception:
+            logger.error(
+                "Kafka producer is unavailable after %s attempts; switching to degraded mode",
+                max_attempts,
+            )
+            self._enabled = False
+            self._producer = None
 
     def is_ready(self) -> bool:
         return self._enabled and self._producer is not None
@@ -96,9 +88,3 @@ class KafkaNotificationJobPublisher:
             logger.exception("Kafka error while publishing topic=%s", self._topic)
         except Exception:
             logger.exception("Unexpected error while publishing topic=%s", self._topic)
-
-
-kafka_publisher = KafkaNotificationJobPublisher(
-    bootstrap_servers=settings.kafka_bootstrap_servers,
-    topic=settings.kafka_outbox_topic,
-)

@@ -1,62 +1,49 @@
 from contextlib import asynccontextmanager
+from fastapi import FastAPI, Response
+from fastapi.middleware.cors import CORSMiddleware
 
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-from sqlalchemy import text
-
-from notifications.common.config import settings
-from notifications.common.db import engine
-from notifications.common.kafka import kafka_publisher
-from notifications.notifications_api.api.v1.events import router as events_router
-from notifications.notifications_api.api.v1.templates import router as templates_router
+from notifications.common.health_files import is_ready, mark_ready, clear_ready
+from notifications.notifications_api.api.v1 import events, templates
+from notifications.notifications_api.utils.dependencies import get_kafka_publisher
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await kafka_publisher.start()
-    try:
-        yield
-    finally:
-        await kafka_publisher.stop()
+    clear_ready()
+    publisher = get_kafka_publisher()
+    await publisher.start()
+    mark_ready()
+    yield
+    clear_ready()
+    await publisher.stop()
 
 
 app = FastAPI(
-    title=settings.project_name,
-    version="0.1.0",
+    title="Notifications API",
+    version="1.0.0",
     lifespan=lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@app.get("/health", tags=["health"])
-async def health() -> dict:
+
+@app.get("/health")
+async def health():
     return {"status": "ok"}
 
 
-@app.get("/ready", tags=["health"])
+@app.get("/ready")
 async def ready():
-    try:
-        async with engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
-    except Exception as exc:
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "not_ready",
-                "checks": {"db": f"error:{type(exc).__name__}"},
-            },
-        )
-
-    if not kafka_publisher.is_ready():
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "not_ready",
-                "checks": {"db": "ok", "kafka": "not_ready"},
-            },
-        )
-
-    return {"status": "ok", "checks": {"db": "ok", "kafka": "ok"}}
+    if is_ready():
+        return Response(status_code=200)
+    return Response(status_code=503)
 
 
-app.include_router(events_router, prefix=settings.api_v1_prefix)
-app.include_router(templates_router, prefix=settings.api_v1_prefix)
+app.include_router(events.router, prefix="/api/v1")
+app.include_router(templates.router, prefix="/api/v1")
